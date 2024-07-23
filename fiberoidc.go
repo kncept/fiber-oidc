@@ -97,22 +97,30 @@ func handleOAuth2Callback(cfg Config, c *fiber.Ctx, idTokenVerifier *gooidc.IDTo
 	return cfg.SuccessHandler(state, c)
 }
 
+func doAuthRequiredRedirect(cfg Config, c *fiber.Ctx) error {
+	state, err := cfg.StateEncoder(c)
+	if err != nil {
+		return err
+	}
+	// V3 Redirect (for later)
+	// return c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
+	return c.Redirect(cfg.OidcConfig.AuthCodeURL(state), 302)
+}
+
 func handleProtectedRoute(cfg Config, c *fiber.Ctx, idTokenVerifier *gooidc.IDTokenVerifier) error {
 	rawToken := getAuthToken(cfg, c)
 	if rawToken == "" {
-		state, err := cfg.StateEncoder(c)
-		if err != nil {
-			return err
-		}
-		// V3 Redirect (for later)
-		// return c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
-		return c.Redirect(cfg.OidcConfig.AuthCodeURL(state), 302)
+		return doAuthRequiredRedirect(cfg, c)
 	}
 
 	// Parse the JWT
 	// token, err := jwt.Parse([]byte(tokenSring))
 	idToken, err := idTokenVerifier.Verify(c.Context(), rawToken)
 	if err != nil {
+		// handle expired by re-asking for auth
+		if _, ok := err.(*gooidc.TokenExpiredError); ok {
+			return doAuthRequiredRedirect(cfg, c)
+		}
 		return cfg.Unauthorized(c)
 	}
 	if idToken == nil {

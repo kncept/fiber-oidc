@@ -1,145 +1,146 @@
 package fiberoidc
 
 import (
-	"encoding/base64"
 	"fmt"
-	"io"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber"
-	"github.com/stretchr/testify/require"
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
 )
 
-// go test -run Test_BasicAuth_Next
-func Test_BasicAuth_Next(t *testing.T) {
-	t.Parallel()
+func execVirtualHandler(
+	uri string,
+	authHeader string,
+	headers map[string]string,
+	handler fiber.Handler,
+) {
 	app := fiber.New()
-	app.Use(New(Config{
-		Next: func(_ fiber.Ctx) bool {
-			return true
-		},
-	}))
-
-	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/", nil))
-	require.NoError(t, err)
-	require.Equal(t, fiber.StatusNotFound, resp.StatusCode)
-}
-
-func Test_Middleware_BasicAuth(t *testing.T) {
-	t.Parallel()
-	app := fiber.New()
-
-	app.Get("/testauth", func(c fiber.Ctx) error {
-		username := UsernameFromContext(c)
-		password := PasswordFromContext(c)
-
-		return c.SendString(username + password)
-	})
-
-	tests := []struct {
-		url        string
-		statusCode int
-		username   string
-		password   string
-	}{
-		{
-			url:        "/testauth",
-			statusCode: 200,
-			username:   "john",
-			password:   "doe",
-		},
-		{
-			url:        "/testauth",
-			statusCode: 200,
-			username:   "admin",
-			password:   "123456",
-		},
-		{
-			url:        "/testauth",
-			statusCode: 401,
-			username:   "ee",
-			password:   "123456",
-		},
-	}
-
-	for _, tt := range tests {
-		// Base64 encode credentials for http auth header
-		creds := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", tt.username, tt.password)))
-
-		req := httptest.NewRequest(fiber.MethodGet, "/testauth", nil)
-		req.Header.Add("Authorization", "Basic "+creds)
-		resp, err := app.Test(req)
-		require.NoError(t, err)
-
-		body, err := io.ReadAll(resp.Body)
-
-		require.NoError(t, err)
-		require.Equal(t, tt.statusCode, resp.StatusCode)
-
-		if tt.statusCode == 200 {
-			require.Equal(t, fmt.Sprintf("%s%s", tt.username, tt.password), string(body))
-		}
-	}
-}
-
-// go test -v -run=^$ -bench=Benchmark_Middleware_BasicAuth -benchmem -count=4
-func Benchmark_Middleware_BasicAuth(b *testing.B) {
-	app := fiber.New()
-
-	app.Use(New(Config{
-		Users: map[string]string{
-			"john": "doe",
-		},
-	}))
-	app.Get("/", func(c fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusTeapot)
-	})
-
+	app.Get(uri, handler)
 	h := app.Handler()
-
 	fctx := &fasthttp.RequestCtx{}
 	fctx.Request.Header.SetMethod(fiber.MethodGet)
 	fctx.Request.SetRequestURI("/")
-	fctx.Request.Header.Set(fiber.HeaderAuthorization, "basic am9objpkb2U=") // john:doe
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for n := 0; n < b.N; n++ {
-		h(fctx)
+	if authHeader != "" {
+		fctx.Request.Header.Set(fiber.HeaderAuthorization, authHeader)
 	}
-
-	require.Equal(b, fiber.StatusTeapot, fctx.Response.Header.StatusCode())
+	for name, value := range headers {
+		fctx.Request.Header.SetCookie(name, value)
+	}
+	h(fctx)
 }
 
-// go test -v -run=^$ -bench=Benchmark_Middleware_BasicAuth -benchmem -count=4
-func Benchmark_Middleware_BasicAuth_Upper(b *testing.B) {
-	app := fiber.New()
+func TestVirtualHandler(t *testing.T) {
+	hasExecuted := false
+	execVirtualHandler("/", "", nil, func(c *fiber.Ctx) error { hasExecuted = true; return nil })
+	if !hasExecuted {
+		t.Fail()
+	}
+}
 
-	app.Use(New(Config{
-		Users: map[string]string{
-			"john": "doe",
-		},
-	}))
-	app.Get("/", func(c fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusTeapot)
-	})
-
-	h := app.Handler()
-
-	fctx := &fasthttp.RequestCtx{}
-	fctx.Request.Header.SetMethod(fiber.MethodGet)
-	fctx.Request.SetRequestURI("/")
-	fctx.Request.Header.Set(fiber.HeaderAuthorization, "Basic am9objpkb2U=") // john:doe
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for n := 0; n < b.N; n++ {
-		h(fctx)
+func TestGetAuth(t *testing.T) {
+	authHeaderValue := uuid.NewString()
+	authCookieName := "cookie-id"
+	authCookieValue := uuid.NewString()
+	if authHeaderValue == authCookieValue {
+		t.FailNow() // not gonna happen
 	}
 
-	require.Equal(b, fiber.StatusTeapot, fctx.Response.Header.StatusCode())
+	execVirtualHandler(
+		"/",
+		"",
+		nil,
+		func(c *fiber.Ctx) error {
+			token := getAuthToken(Config{}, c)
+			if token != "" {
+				t.Fatalf("Unexpected Auth Token: %v", token)
+			}
+			return nil
+		},
+	)
+
+	execVirtualHandler(
+		"/",
+		"not a bearer token",
+		map[string]string{
+			authCookieName: authCookieValue,
+		},
+		func(c *fiber.Ctx) error {
+			token := getAuthToken(Config{}, c)
+			if token != "" {
+				t.Fatalf("Unexpected Auth Token: %v", token)
+			}
+			return nil
+		},
+	)
+	execVirtualHandler(
+		"/",
+		fmt.Sprintf("bearer %v", authHeaderValue),
+		map[string]string{
+			authCookieName: authCookieValue,
+		},
+		func(c *fiber.Ctx) error {
+			token := getAuthToken(Config{}, c)
+			if token != authHeaderValue {
+				t.Fatalf("Unexpected Auth Token: %v", token)
+			}
+			return nil
+		},
+	)
+
+	execVirtualHandler(
+		"/",
+		fmt.Sprintf("bearer %v", authHeaderValue),
+		map[string]string{
+			authCookieName: authCookieValue,
+		},
+		func(c *fiber.Ctx) error {
+
+			token := getAuthToken(Config{
+				AuthCookieName: authCookieName,
+			}, c)
+			if token != authHeaderValue {
+				t.Fatalf("Unexpected Auth Token: %v", token)
+			}
+			return nil
+		},
+	)
+
+	// falls back to cookie (when present)
+	execVirtualHandler(
+		"/",
+		"",
+		map[string]string{
+			authCookieName: authCookieValue,
+		},
+		func(c *fiber.Ctx) error {
+
+			token := getAuthToken(Config{
+				AuthCookieName: authCookieName,
+			}, c)
+			if token != authCookieValue {
+				t.Fatalf("Unexpected Auth Token: %v", token)
+			}
+			return nil
+		},
+	)
+
+	// ANY non empty auth header takes precedence
+	execVirtualHandler(
+		"/",
+		"invalid",
+		map[string]string{
+			authCookieName: authCookieValue,
+		},
+		func(c *fiber.Ctx) error {
+
+			token := getAuthToken(Config{
+				AuthCookieName: authCookieName,
+			}, c)
+			if token != "" {
+				t.Fatalf("Unexpected Auth Token: %v", token)
+			}
+			return nil
+		},
+	)
 }
