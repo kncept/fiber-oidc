@@ -3,6 +3,10 @@
 Fiber OIDC Middleware.<br>
 Yes, it's quite a lot chunkier than fiber, but it does provide an easy way to integrate OIDC into your app.
 
+N.B. This is _not_ production hardened.<br>
+It does things like use open plaintext cookies, and doesn't quite have all the hooks that a full produciton
+setup would require.
+
 # Quickstart
 
 To install:
