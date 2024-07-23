@@ -1,8 +1,11 @@
 # Fiber OIDC
 
-Fiber OIDC Middleware.
+Fiber OIDC Middleware.<br>
+Yes, it's quite a lot chunkier than fiber, but it does provide an easy way to integrate OIDC into your app.
 
-To install, 
+# Quickstart
+
+To install:
 `go get github.com/kncept/fiber-oidc`
 
 Example snippet from another app:
@@ -23,7 +26,6 @@ oidcProvider, err := gooidc.NewProvider(context.Background(), "https://accounts.
 		},
 	}
 
-	// fowrard for oidc login to: https://oidc.kncept.com/login
 	app.Use(fiberoidc.New(fiberoidc.Config{
 		OidcProvider:   oidcProvider,
 		OidcConfig:     &oidcConfig,

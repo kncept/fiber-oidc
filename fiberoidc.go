@@ -2,8 +2,6 @@ package fiberoidc
 
 import (
 	"errors"
-	"fmt"
-	"time"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
@@ -41,7 +39,11 @@ func New(config Config) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		// only execute middleware on protected routes
 		// by default, all routes are protected
-		if !cfg.Protected(c) {
+		protected, err := cfg.Protected(c)
+		if err != nil {
+			return err
+		}
+		if !protected {
 			return c.Next()
 		}
 
@@ -51,7 +53,7 @@ func New(config Config) fiber.Handler {
 			//decode response
 
 			// state verification (and/or restoration)
-			// c.Params("state")
+			state := c.Query("state")
 
 			// callback to the oidc server to exchange the code
 			code := c.Query("code")
@@ -89,9 +91,8 @@ func New(config Config) fiber.Handler {
 					Value: rawIDToken,
 				})
 			}
-
 			// complete, use *FromContext to access user details
-			return nil
+			return cfg.SuccessHandler(state, c)
 		}
 
 		// Get authorization header
@@ -101,14 +102,22 @@ func New(config Config) fiber.Handler {
 		if auth == "" && cfg.AuthCookieName != "" {
 			auth = c.Cookies(cfg.AuthCookieName)
 			if auth == "" {
+				state, err := cfg.StateEncoder(c)
+				if err != nil {
+					return err
+				}
 				// V3 Redirect (for later)
 				// return c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
-				return c.Redirect(cfg.OidcConfig.AuthCodeURL(fmt.Sprintf("now-%v", time.Now())), 302)
+				return c.Redirect(cfg.OidcConfig.AuthCodeURL(state), 302)
 			}
 		} else {
+			// no bearer token - assume this requires a redirect
 			if len(auth) <= 7 || !utils.EqualFold(auth[:7], "bearer ") {
-				// no bearer token - assume this requires a redirect
-				return c.Redirect(cfg.OidcConfig.AuthCodeURL(fmt.Sprintf("now-%v", time.Now())), 302)
+				state, err := cfg.StateEncoder(c)
+				if err != nil {
+					return err
+				}
+				return c.Redirect(cfg.OidcConfig.AuthCodeURL(state), 302)
 			}
 			// Trim to just the token
 			auth = auth[7:]
