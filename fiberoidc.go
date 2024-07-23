@@ -2,6 +2,8 @@ package fiberoidc
 
 import (
 	"errors"
+	"fmt"
+	"time"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
@@ -37,10 +39,9 @@ func New(config Config) fiber.Handler {
 
 	// Return new handler
 	return func(c *fiber.Ctx) error {
-
-		// Don't execute middleware if Next returns true
-		// So in order to NOT require auth on a route (like an index, or static files), return true here
-		if cfg.Next != nil && cfg.Next(*c) {
+		// only execute middleware on protected routes
+		// by default, all routes are protected
+		if !cfg.Protected(c) {
 			return c.Next()
 		}
 
@@ -53,7 +54,7 @@ func New(config Config) fiber.Handler {
 			// c.Params("state")
 
 			// callback to the oidc server to exchange the code
-			code := c.Get("code")
+			code := c.Query("code")
 			oauth2Token, err := cfg.OidcConfig.Exchange(c.Context(), code)
 			if err != nil {
 				return err
@@ -101,13 +102,13 @@ func New(config Config) fiber.Handler {
 			auth = c.Cookies(cfg.AuthCookieName)
 			if auth == "" {
 				// V3 Redirect (for later)
-				// c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
-				c.Redirect(cfg.OidcConfig.AuthCodeURL(""), 302)
+				// return c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
+				return c.Redirect(cfg.OidcConfig.AuthCodeURL(fmt.Sprintf("now-%v", time.Now())), 302)
 			}
 		} else {
 			if len(auth) <= 7 || !utils.EqualFold(auth[:7], "bearer ") {
 				// no bearer token - assume this requires a redirect
-				c.Redirect(cfg.OidcConfig.AuthCodeURL(""), 302)
+				return c.Redirect(cfg.OidcConfig.AuthCodeURL(fmt.Sprintf("now-%v", time.Now())), 302)
 			}
 			// Trim to just the token
 			auth = auth[7:]
@@ -115,28 +116,29 @@ func New(config Config) fiber.Handler {
 
 		// Parse the JWT
 		// token, err := jwt.Parse([]byte(tokenSring))
-		token, err := idTokenVerifier.Verify(c.Context(), auth)
+		idToken, err := idTokenVerifier.Verify(c.Context(), auth)
 		if err != nil {
 			return cfg.Unauthorized(c)
 		}
-		if token == nil {
+		if idToken == nil {
 			return cfg.Unauthorized(c)
+		}
+		claims := &OidcClaims{}
+		err = idToken.Claims(&claims)
+		if err != nil {
+			return err
 		}
 
 		// Set the JWT into the context
-		if cfg.Authorizer(*token) {
-			c.Locals(oidcTokenKey{}, token)
-			return c.Next()
-		}
-
-		// Authentication failed
-		return cfg.Unauthorized(c)
+		c.Locals(oidcTokenKey{}, idToken)
+		c.Locals(oidcClaimsKey{}, claims)
+		return c.Next()
 	}
 }
 
 // IdTokenFromContext returns the jwt token found in the context
 // returns a nil pointer if nothing exists
-func IdTokenFromContext(c fiber.Ctx) *gooidc.IDToken {
+func IdTokenFromContext(c *fiber.Ctx) *gooidc.IDToken {
 	token, ok := c.Locals(oidcTokenKey{}).(*gooidc.IDToken)
 	if !ok {
 		return nil
@@ -146,7 +148,7 @@ func IdTokenFromContext(c fiber.Ctx) *gooidc.IDToken {
 
 // ClaimsFromContext returns the Oidc Claims fount in the context
 // returns a nil pointer if nothing exists
-func ClaimsFromContext(c fiber.Ctx) *OidcClaims {
+func ClaimsFromContext(c *fiber.Ctx) *OidcClaims {
 	claims, ok := c.Locals(oidcClaimsKey{}).(*OidcClaims)
 	if !ok {
 		return nil
