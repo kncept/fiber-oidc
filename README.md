@@ -34,12 +34,11 @@ oidcProvider, err := gooidc.NewProvider(context.Background(), "https://accounts.
 	}))
 ```
 
+You can access the id token in your handler by doing this: `idToken := fiberoidc.IdTokenFromContext(c)`
+
 ## OIDC Library Implementation
 
-This middleware is built over https://github.com/coreos/go-oidc, which provides support for the https://pkg.go.dev/golang.org/x/oauth2 package
- 
- The combination of a popular oidc solution, and the use of golang.org/x/oauth2 should mean that this middleware works for a variety of tools and use cases
- 
+This middleware is built over https://github.com/coreos/go-oidc, which provides support for the https://pkg.go.dev/golang.org/x/oauth2 package.
 
  ## Handling extra claims
  Use a struct something like this:
@@ -58,8 +57,9 @@ This middleware is built over https://github.com/coreos/go-oidc, which provides 
 	PhoneNumberVerified bool   `json:"phone_number_verified,omitempty"`
 }
 ```
-with the following code snippet:
+with the following code snippet in your handler:
 ```
+	idToken := fiberoidc.IdTokenFromContext(c)
     claims := &OidcClaims{}
     err = idToken.Claims(&claims)
 ```
