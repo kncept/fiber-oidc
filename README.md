@@ -40,3 +40,26 @@ This middleware is built over https://github.com/coreos/go-oidc, which provides 
  
  The combination of a popular oidc solution, and the use of golang.org/x/oauth2 should mean that this middleware works for a variety of tools and use cases
  
+
+ ## Handling extra claims
+ Use a struct something like this:
+ ```
+ type OidcClaims struct {
+	Subject  string `json:"sub"`
+	Issuer   string `json:"iss"`
+	Audience string `json:"aud"`
+
+	Name string `json:"name,omitempty"`
+
+	Email         string `json:"email,omitempty"`
+	EmailVerified bool   `json:"email_verified,omitempty"`
+
+	PoneNumber          string `json:"phone_number,omitempty"`
+	PhoneNumberVerified bool   `json:"phone_number_verified,omitempty"`
+}
+```
+with the following code snippet:
+```
+    claims := &OidcClaims{}
+    err = idToken.Claims(&claims)
+```
