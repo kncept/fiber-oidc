@@ -26,8 +26,12 @@ Example snippet from another app:
 
 	app.Get(fiberOidc.CallbackPath(), fiberOidc.CallbackHandler())
 	app.Get("/", fiberOidc.UnprotectedRoute(), func(c *fiber.Ctx) error {
+		subject := "no auth present"
 		idToken := fiberoidc.IdTokenFromContext(c)
-		return c.Render("index", idToken.Subject)
+		if idToken != nil {
+			subject = idToken.Subject
+		}
+		return c.Render("index", subject)
 	})
 	app.Get("/me", fiberOidc.ProtectedRoute(), func(c *fiber.Ctx) error {
 		idToken := fiberoidc.IdTokenFromContext(c)
