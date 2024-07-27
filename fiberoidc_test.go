@@ -46,12 +46,16 @@ func TestGetAuth(t *testing.T) {
 		t.FailNow() // not gonna happen
 	}
 
+	obj := FiberOidcStruct{
+		Config: &Config{},
+	}
+
 	execVirtualHandler(
 		"/",
 		"",
 		nil,
 		func(c *fiber.Ctx) error {
-			token := getAuthToken(Config{}, c)
+			token := obj.getAuthToken(c)
 			if token != "" {
 				t.Fatalf("Unexpected Auth Token: %v", token)
 			}
@@ -66,7 +70,7 @@ func TestGetAuth(t *testing.T) {
 			authCookieName: authCookieValue,
 		},
 		func(c *fiber.Ctx) error {
-			token := getAuthToken(Config{}, c)
+			token := obj.getAuthToken(c)
 			if token != "" {
 				t.Fatalf("Unexpected Auth Token: %v", token)
 			}
@@ -80,13 +84,18 @@ func TestGetAuth(t *testing.T) {
 			authCookieName: authCookieValue,
 		},
 		func(c *fiber.Ctx) error {
-			token := getAuthToken(Config{}, c)
+			token := obj.getAuthToken(c)
 			if token != authHeaderValue {
 				t.Fatalf("Unexpected Auth Token: %v", token)
 			}
 			return nil
 		},
 	)
+
+	// now with auth cookie name set
+	obj.Config = &Config{
+		AuthCookieName: authCookieName,
+	}
 
 	execVirtualHandler(
 		"/",
@@ -96,9 +105,7 @@ func TestGetAuth(t *testing.T) {
 		},
 		func(c *fiber.Ctx) error {
 
-			token := getAuthToken(Config{
-				AuthCookieName: authCookieName,
-			}, c)
+			token := obj.getAuthToken(c)
 			if token != authHeaderValue {
 				t.Fatalf("Unexpected Auth Token: %v", token)
 			}
@@ -115,9 +122,7 @@ func TestGetAuth(t *testing.T) {
 		},
 		func(c *fiber.Ctx) error {
 
-			token := getAuthToken(Config{
-				AuthCookieName: authCookieName,
-			}, c)
+			token := obj.getAuthToken(c)
 			if token != authCookieValue {
 				t.Fatalf("Unexpected Auth Token: %v", token)
 			}
@@ -134,9 +139,7 @@ func TestGetAuth(t *testing.T) {
 		},
 		func(c *fiber.Ctx) error {
 
-			token := getAuthToken(Config{
-				AuthCookieName: authCookieName,
-			}, c)
+			token := obj.getAuthToken(c)
 			if token != "" {
 				t.Fatalf("Unexpected Auth Token: %v", token)
 			}

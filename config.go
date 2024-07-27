@@ -3,23 +3,25 @@ package fiberoidc
 import (
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
-	"golang.org/x/oauth2"
 )
+
+// Defines a function to skip this middleware when returning false.
+// Use this to determine Authenticated and Non-Authenticated routes
+type RouteProtectorFunc func(c *fiber.Ctx) (bool, error)
 
 // Config defines the config for middleware.
 type Config struct {
-	// Optional
-	//
-	// Next defines a function to skip this middleware when returned true.
-	// Use this to determine Non-Authenticated routes, otherwise all routes
-	// will be protected
-	//
-	Protected func(c *fiber.Ctx) (bool, error)
+	Issuer       string
+	ClientId     string
+	ClientSecret string
+	Scopes       []string
+	RedirectURI  string
 
-	// a configured coreos/go-oidc to authenticate against
-	OidcProvider *gooidc.Provider
-	// Configuration for your oauth2 provider
-	OidcConfig *oauth2.Config
+	// // a configured coreos/go-oidc to authenticate against
+	// OidcProvider *gooidc.Provider
+	// // Configuration for your oauth2 provider
+	// OidcConfig *oauth2.Config
+
 	// trigger oidc callback on this path.
 	// It should match the path from the OidcConfig value.
 	// N.B. this is defaulted to the configDefaultCallbackPath (/oidc/callback) if not specified
@@ -55,11 +57,16 @@ type Config struct {
 
 var configDefaultCallbackPath string = "/oidc/callback"
 
+// ClientID:     os.Getenv("OIDC_CLIENT_ID"),
+// ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+// Endpoint:     oidcProvider.Endpoint(),
+// RedirectURL:  fmt.Sprintf("http://localhost:3000%v", redirectUrlPath),
+// Scopes: []string{
+// 	gooidc.ScopeOpenID, "email", "profile",
+// },
+
 // ConfigDefault is the default config
 var ConfigDefault = Config{
-	Protected: func(c *fiber.Ctx) (bool, error) {
-		return true, nil
-	},
 	Unauthorized: func(c *fiber.Ctx) error {
 		c.Set(fiber.HeaderWWWAuthenticate, "Bearer")
 		return c.SendStatus(fiber.StatusUnauthorized)
@@ -71,6 +78,9 @@ var ConfigDefault = Config{
 	SuccessHandler: func(state string, c *fiber.Ctx) error {
 		return c.Redirect(state, 302)
 	},
+	Scopes: []string{
+		gooidc.ScopeOpenID, "email", "profile",
+	},
 }
 
 // Helper function to set default values
@@ -81,9 +91,6 @@ func configDefault(config ...Config) Config {
 	}
 
 	// Set default values
-	if cfg.Protected == nil {
-		cfg.Protected = ConfigDefault.Protected
-	}
 	if cfg.Unauthorized == nil {
 		cfg.Unauthorized = ConfigDefault.Unauthorized
 	}
@@ -95,6 +102,9 @@ func configDefault(config ...Config) Config {
 	}
 	if cfg.SuccessHandler == nil {
 		cfg.SuccessHandler = ConfigDefault.SuccessHandler
+	}
+	if cfg.Scopes == nil || len(cfg.Scopes) == 0 {
+		cfg.Scopes = ConfigDefault.Scopes
 	}
 
 	return cfg
