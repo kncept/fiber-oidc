@@ -14,28 +14,25 @@ To install:
 
 Example snippet from another app:
 ```
-oidcProvider, err := gooidc.NewProvider(context.Background(), "https://accounts.google.com")
-	if err != nil {
-		panic(err)
-	}
-
-	redirectUrlPath := "/oidc/callback"
-	oidcConfig := oauth2.Config{
-		ClientID:     os.Getenv("OIDC_CLIENT_ID"),
+	fiberOidc, err := fiberoidc.New(ctx, &fiberoidc.Config{
+		Issuer:       "https://accounts.google.com",
+		ClientId:     os.Getenv("OIDC_CLIENT_ID"),
 		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-		Endpoint:     oidcProvider.Endpoint(),
-		RedirectURL:  fmt.Sprintf("http://localhost:3000%v", redirectUrlPath),
-		Scopes: []string{
-			gooidc.ScopeOpenID, "email", "profile",
-		},
+		RedirectUri:  "http://localhost:3000/oauth2/callback",
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	app.Use(fiberoidc.New(fiberoidc.Config{
-		OidcProvider:   oidcProvider,
-		OidcConfig:     &oidcConfig,
-		CallbackPath:   &redirectUrlPath, // I think? ==> if so, we can refactor to omit CallbackPath
-		AuthCookieName: "user-token",
-	}))
+	app.Get(fiberOidc.CallbackPath(), fiberOidc.CallbackHandler())
+	app.Get("/", fiberOidc.UnprotectedRoute(), func(c *fiber.Ctx) error {
+		idToken := fiberoidc.IdTokenFromContext(c)
+		return c.Render("index", idToken.Subject)
+	})
+	app.Get("/me", fiberOidc.ProtectedRoute(), func(c *fiber.Ctx) error {
+		idToken := fiberoidc.IdTokenFromContext(c)
+		return c.Render("index", idToken.Subject)
+	})
 ```
 
 You can access the id token in your handler by doing this: `idToken := fiberoidc.IdTokenFromContext(c)`

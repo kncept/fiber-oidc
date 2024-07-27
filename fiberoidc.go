@@ -23,41 +23,66 @@ type FiberOidcStruct struct {
 }
 
 type FiberOidc interface {
-	AppProtector(routeProtector RouteProtectorFunc) fiber.Handler
-	RouteProtector() fiber.Handler
+	// Allows protection of the entire app in one handler
+	// This style matches the way that many web applications (eg: spring boot)
+	// tend to handle security
+	ProtectedApp(routeProtector RouteProtectorFunc) fiber.Handler
+
+	// Allows protection of a single route
+	// Will redirect if required
+	ProtectedRoute() fiber.Handler
+
+	// Does not protect the route, but will still bind any valid
+	// auth token to the request
+	UnprotectedRoute() fiber.Handler
+
+	// Handles the OIDC callback
 	CallbackHandler() fiber.Handler
+	// easy access to the callback path
+	CallbackPath() string
 }
 
-func New(ctx context.Context, config Config) (FiberOidc, error) {
-	// ensure config is defaulted correctly
-	cfg := configDefault(config)
+func New(ctx context.Context, config *Config) (FiberOidc, error) {
+	err := config.Validate()
+	if err != nil {
+		return nil, err
+	}
 
-	oidcProvider, err := gooidc.NewProvider(ctx, cfg.Issuer)
+	// ensure config is defaulted correctly
+	config.WithDefaults()
+
+	oidcProvider, err := gooidc.NewProvider(ctx, config.Issuer)
 	if err != nil {
 		return nil, err
 	}
 
 	oidcConfig := &oauth2.Config{
-		ClientID:     cfg.ClientId,
-		ClientSecret: cfg.ClientSecret,
-		RedirectURL:  cfg.RedirectURI,
+		ClientID:     config.ClientId,
+		ClientSecret: config.ClientSecret,
+		RedirectURL:  config.RedirectUri,
 	}
 
 	// cache id token verifier
 	idTokenVerifier := oidcProvider.Verifier(&gooidc.Config{
-		ClientID: cfg.ClientId,
+		ClientID: config.ClientId,
 	})
 	return &FiberOidcStruct{
-		Config:          &cfg,
+		Config:          config,
 		OidcConfig:      oidcConfig,
 		IdTokenVerifier: idTokenVerifier,
 		OidcProvider:    oidcProvider,
 	}, nil
 }
 
-func (obj *FiberOidcStruct) RouteProtector() fiber.Handler {
+func (obj *FiberOidcStruct) ProtectedRoute() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		return obj.handleOAuth2Callback(c)
+	}
+}
+
+func (obj *FiberOidcStruct) UnprotectedRoute() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		return obj.handleUnprotectedRoute(c)
 	}
 }
 
@@ -67,8 +92,12 @@ func (obj *FiberOidcStruct) CallbackHandler() fiber.Handler {
 	}
 }
 
+func (obj *FiberOidcStruct) CallbackPath() string {
+	return obj.Config.CallbackPath
+}
+
 // New creates a new middleware handler
-func (obj *FiberOidcStruct) AppProtector(routeProtector RouteProtectorFunc) fiber.Handler {
+func (obj *FiberOidcStruct) ProtectedApp(routeProtector RouteProtectorFunc) fiber.Handler {
 
 	// Return new handler
 	return func(c *fiber.Ctx) error {
@@ -81,13 +110,13 @@ func (obj *FiberOidcStruct) AppProtector(routeProtector RouteProtectorFunc) fibe
 				return err
 			}
 			if !protected {
-				return c.Next()
+				return obj.handleUnprotectedRoute(c)
 			}
 		}
 
 		// Set token back to client on this call
 		// essentially handleOAuth2Callback from https://github.com/coreos/go-oidc
-		if obj.Config.CallbackPath != nil && c.Path() == *obj.Config.CallbackPath {
+		if c.Path() == obj.Config.CallbackPath {
 			return obj.handleOAuth2Callback(c)
 		}
 
@@ -145,11 +174,11 @@ func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 		})
 	}
 	// complete, use *FromContext to access user details
-	return obj.Config.SuccessHandler(state, c)
+	return obj.Config.LoginSuccessHandler(state, c)
 }
 
 func (obj *FiberOidcStruct) doAuthRequiredRedirect(c *fiber.Ctx) error {
-	state, err := obj.Config.StateEncoder(c)
+	state, err := obj.Config.LoginStateEncoder(c)
 	if err != nil {
 		return err
 	}
@@ -179,6 +208,20 @@ func (obj *FiberOidcStruct) handleProtectedRoute(c *fiber.Ctx) error {
 	}
 	// if successful, bind to context
 	c.Locals(oidcTokenKey{}, idToken)
+	return c.Next()
+}
+
+func (obj *FiberOidcStruct) handleUnprotectedRoute(c *fiber.Ctx) error {
+	rawToken := obj.getAuthToken(c)
+	if rawToken != "" {
+		// Parse the JWT
+		// token, err := jwt.Parse([]byte(tokenSring))
+		idToken, err := obj.IdTokenVerifier.Verify(c.Context(), rawToken)
+		if err != nil && idToken != nil {
+			// if successful, bind to context
+			c.Locals(oidcTokenKey{}, idToken)
+		}
+	}
 	return c.Next()
 }
 

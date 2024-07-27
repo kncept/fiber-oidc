@@ -1,6 +1,10 @@
 package fiberoidc
 
 import (
+	"errors"
+	"net/url"
+	"strings"
+
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
 )
@@ -14,68 +18,57 @@ type Config struct {
 	Issuer       string
 	ClientId     string
 	ClientSecret string
-	Scopes       []string
-	RedirectURI  string
 
-	// // a configured coreos/go-oidc to authenticate against
-	// OidcProvider *gooidc.Provider
-	// // Configuration for your oauth2 provider
-	// OidcConfig *oauth2.Config
+	// OPTIONAL, will be defaulted if unspecified
+	Scopes []string
 
+	// FULLY QUALIFIED Oauth2 Callback path
+	RedirectUri string
+
+	// OPTIONAL
 	// trigger oidc callback on this path.
-	// It should match the path from the OidcConfig value.
-	// N.B. this is defaulted to the configDefaultCallbackPath (/oidc/callback) if not specified
-	CallbackPath *string
+	// It MUST match the RedirectUri value
+	// If blank, this is default to the entire path from the RedirectUri
+	CallbackPath string
 
-	// Optional
+	// OPTIONAL
 	//
 	// if set, also use an auth cookie (allow identity token to be set directly)
 	AuthCookieName string
 
-	// Optional
+	// OPTIONAL
 	//
 	// Unauthorized defines the response body for unauthorized responses.
 	// By default it will return with a 401 Unauthorized and the correct WWW-Auth header
 	Unauthorized fiber.Handler
 
-	// Optional
+	// OPTIONAL
 	//
 	// Called to serialize state for the OIDC redirect
 	// If unspecified, will just the be the current path
 	//
 	// Should be paired with a SuccessHandler if provided
-	StateEncoder func(c *fiber.Ctx) (string, error)
-	// Optional
+	LoginStateEncoder func(c *fiber.Ctx) (string, error)
+	// OPTIONAL
 	//
 	// Called on login success to restore any application state there
 	// may have been.
 	// if unspecified, will assume that 'state' was the url path, and redirect there
 	//
 	// Should be paired with a StateEncoder if provided
-	SuccessHandler func(state string, c *fiber.Ctx) error
+	LoginSuccessHandler func(state string, c *fiber.Ctx) error
 }
 
-var configDefaultCallbackPath string = "/oidc/callback"
-
-// ClientID:     os.Getenv("OIDC_CLIENT_ID"),
-// ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-// Endpoint:     oidcProvider.Endpoint(),
-// RedirectURL:  fmt.Sprintf("http://localhost:3000%v", redirectUrlPath),
-// Scopes: []string{
-// 	gooidc.ScopeOpenID, "email", "profile",
-// },
-
 // ConfigDefault is the default config
-var ConfigDefault = Config{
+var configDefaults = Config{
 	Unauthorized: func(c *fiber.Ctx) error {
 		c.Set(fiber.HeaderWWWAuthenticate, "Bearer")
 		return c.SendStatus(fiber.StatusUnauthorized)
 	},
-	CallbackPath: &configDefaultCallbackPath,
-	StateEncoder: func(c *fiber.Ctx) (string, error) {
+	LoginStateEncoder: func(c *fiber.Ctx) (string, error) {
 		return c.Path(), nil
 	},
-	SuccessHandler: func(state string, c *fiber.Ctx) error {
+	LoginSuccessHandler: func(state string, c *fiber.Ctx) error {
 		return c.Redirect(state, 302)
 	},
 	Scopes: []string{
@@ -84,28 +77,70 @@ var ConfigDefault = Config{
 }
 
 // Helper function to set default values
-func configDefault(config ...Config) Config {
-	cfg := Config{}
-	if len(config) > 0 {
-		cfg = config[0]
+func (cfg *Config) WithDefaults() *Config {
+	if cfg == nil {
+		cfg = &Config{}
 	}
 
-	// Set default values
 	if cfg.Unauthorized == nil {
-		cfg.Unauthorized = ConfigDefault.Unauthorized
+		cfg.Unauthorized = configDefaults.Unauthorized
 	}
-	if cfg.CallbackPath == nil {
-		cfg.CallbackPath = ConfigDefault.CallbackPath
+	if cfg.CallbackPath == "" {
+		// default to be the entire path in redirect url
+		u, err := url.Parse(cfg.RedirectUri)
+		if err != nil {
+			cfg.CallbackPath = u.Path
+		}
 	}
-	if cfg.StateEncoder == nil {
-		cfg.StateEncoder = ConfigDefault.StateEncoder
+	if cfg.LoginStateEncoder == nil {
+		cfg.LoginStateEncoder = configDefaults.LoginStateEncoder
 	}
-	if cfg.SuccessHandler == nil {
-		cfg.SuccessHandler = ConfigDefault.SuccessHandler
+	if cfg.LoginSuccessHandler == nil {
+		cfg.LoginSuccessHandler = configDefaults.LoginSuccessHandler
 	}
 	if cfg.Scopes == nil || len(cfg.Scopes) == 0 {
-		cfg.Scopes = ConfigDefault.Scopes
+		cfg.Scopes = configDefaults.Scopes
 	}
 
 	return cfg
+}
+
+func (obj *Config) Validate() error {
+	validationErrors := make([]error, 0)
+
+	if obj.Issuer == "" {
+		validationErrors = append(validationErrors, errors.New("issuer must be specified"))
+	}
+	if obj.ClientId == "" {
+		validationErrors = append(validationErrors, errors.New("client id must be specified"))
+	}
+	if obj.ClientSecret == "" {
+		validationErrors = append(validationErrors, errors.New("client secret must be specified"))
+	}
+	if obj.RedirectUri == "" {
+		validationErrors = append(validationErrors, errors.New("redirect uri must be specified"))
+	}
+	if !strings.HasSuffix(obj.RedirectUri, obj.CallbackPath) {
+		validationErrors = append(validationErrors, errors.New("callback path match redirect uri"))
+	}
+	if !strings.HasPrefix(obj.CallbackPath, "/") {
+		validationErrors = append(validationErrors, errors.New("callback path must start with a slash"))
+	}
+
+	//
+
+	if obj.CallbackPath == "" {
+		validationErrors = append(validationErrors, errors.New("callback path must be specified"))
+	}
+	if obj.CallbackPath == "" {
+		validationErrors = append(validationErrors, errors.New("callback path must be specified"))
+	}
+	if obj.CallbackPath == "" {
+		validationErrors = append(validationErrors, errors.New("callback path must be specified"))
+	}
+
+	if len(validationErrors) == 0 {
+		return nil
+	}
+	return errors.Join(validationErrors...)
 }
