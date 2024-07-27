@@ -15,10 +15,11 @@ To install:
 Example snippet from another app:
 ```
 	fiberOidc, err := fiberoidc.New(ctx, &fiberoidc.Config{
-		Issuer:       "https://accounts.google.com",
-		ClientId:     os.Getenv("OIDC_CLIENT_ID"),
-		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-		RedirectUri:  "http://localhost:3000/oauth2/callback",
+		Issuer:         "https://accounts.google.com",
+		ClientId:       os.Getenv("OIDC_CLIENT_ID"),
+		ClientSecret:   os.Getenv("OIDC_CLIENT_SECRET"),
+		RedirectUri:    "http://localhost:3000/oauth2/callback",
+		AuthCookieName: "bearer-auth",
 	})
 	if err != nil {
 		return nil, err

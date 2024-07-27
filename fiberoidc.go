@@ -43,13 +43,13 @@ type FiberOidc interface {
 }
 
 func New(ctx context.Context, config *Config) (FiberOidc, error) {
+	// ensure config is defaulted correctly
+	config.WithDefaults()
+
 	err := config.Validate()
 	if err != nil {
 		return nil, err
 	}
-
-	// ensure config is defaulted correctly
-	config.WithDefaults()
 
 	oidcProvider, err := gooidc.NewProvider(ctx, config.Issuer)
 	if err != nil {
@@ -59,7 +59,9 @@ func New(ctx context.Context, config *Config) (FiberOidc, error) {
 	oidcConfig := &oauth2.Config{
 		ClientID:     config.ClientId,
 		ClientSecret: config.ClientSecret,
+		Endpoint:     oidcProvider.Endpoint(),
 		RedirectURL:  config.RedirectUri,
+		Scopes:       config.Scopes,
 	}
 
 	// cache id token verifier
@@ -76,7 +78,7 @@ func New(ctx context.Context, config *Config) (FiberOidc, error) {
 
 func (obj *FiberOidcStruct) ProtectedRoute() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		return obj.handleOAuth2Callback(c)
+		return obj.handleProtectedRoute(c)
 	}
 }
 
@@ -88,7 +90,7 @@ func (obj *FiberOidcStruct) UnprotectedRoute() fiber.Handler {
 
 func (obj *FiberOidcStruct) CallbackHandler() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		return obj.handleProtectedRoute(c)
+		return obj.handleOAuth2Callback(c)
 	}
 }
 
@@ -182,6 +184,7 @@ func (obj *FiberOidcStruct) doAuthRequiredRedirect(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
 	// V3 Redirect (for later)
 	// return c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
 	return c.Redirect(obj.OidcConfig.AuthCodeURL(state), 302)
@@ -217,10 +220,11 @@ func (obj *FiberOidcStruct) handleUnprotectedRoute(c *fiber.Ctx) error {
 		// Parse the JWT
 		// token, err := jwt.Parse([]byte(tokenSring))
 		idToken, err := obj.IdTokenVerifier.Verify(c.Context(), rawToken)
-		if err != nil && idToken != nil {
+		if err == nil && idToken != nil {
 			// if successful, bind to context
 			c.Locals(oidcTokenKey{}, idToken)
 		}
+
 	}
 	return c.Next()
 }

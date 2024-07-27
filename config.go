@@ -2,6 +2,7 @@ package fiberoidc
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -49,7 +50,7 @@ type Config struct {
 	//
 	// Should be paired with a SuccessHandler if provided
 	LoginStateEncoder func(c *fiber.Ctx) (string, error)
-	// OPTIONAL
+	// Optional
 	//
 	// Called on login success to restore any application state there
 	// may have been.
@@ -85,10 +86,10 @@ func (cfg *Config) WithDefaults() *Config {
 	if cfg.Unauthorized == nil {
 		cfg.Unauthorized = configDefaults.Unauthorized
 	}
-	if cfg.CallbackPath == "" {
+	if cfg.RedirectUri != "" && cfg.CallbackPath == "" {
 		// default to be the entire path in redirect url
 		u, err := url.Parse(cfg.RedirectUri)
-		if err != nil {
+		if err == nil {
 			cfg.CallbackPath = u.Path
 		}
 	}
@@ -120,23 +121,16 @@ func (obj *Config) Validate() error {
 	if obj.RedirectUri == "" {
 		validationErrors = append(validationErrors, errors.New("redirect uri must be specified"))
 	}
-	if !strings.HasSuffix(obj.RedirectUri, obj.CallbackPath) {
-		validationErrors = append(validationErrors, errors.New("callback path match redirect uri"))
-	}
-	if !strings.HasPrefix(obj.CallbackPath, "/") {
-		validationErrors = append(validationErrors, errors.New("callback path must start with a slash"))
-	}
-
-	//
 
 	if obj.CallbackPath == "" {
 		validationErrors = append(validationErrors, errors.New("callback path must be specified"))
-	}
-	if obj.CallbackPath == "" {
-		validationErrors = append(validationErrors, errors.New("callback path must be specified"))
-	}
-	if obj.CallbackPath == "" {
-		validationErrors = append(validationErrors, errors.New("callback path must be specified"))
+	} else {
+		if !strings.HasSuffix(obj.RedirectUri, obj.CallbackPath) {
+			validationErrors = append(validationErrors, errors.New("callback path match redirect uri"))
+		}
+		if !strings.HasPrefix(obj.CallbackPath, "/") {
+			validationErrors = append(validationErrors, fmt.Errorf("callback path must start with a slash: %v", obj.CallbackPath))
+		}
 	}
 
 	if len(validationErrors) == 0 {
