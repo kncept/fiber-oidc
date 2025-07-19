@@ -9,7 +9,7 @@ That said, these things are easy to fix with a PR that enables support for your 
 # Quickstart
 
 To install:
-`go get github.com/kncept/fiber-oidc@v1.0.0`
+`go get github.com/kncept/fiber-oidc@v1.0.1`
 
 Example snippet from another app:
 ```
