@@ -38,8 +38,12 @@ type FiberOidc interface {
 
 	// Handles the OIDC callback
 	CallbackHandler() fiber.Handler
+
 	// easy access to the callback path
 	CallbackPath() string
+
+	// FiberOidc uses lazy initialization - call this if you're eager!
+	Initialize(ctx context.Context) error
 }
 
 func New(ctx context.Context, config *Config) (FiberOidc, error) {
@@ -138,6 +142,18 @@ func (obj *FiberOidcStruct) ProtectedApp(routeProtector RouteProtectorFunc) fibe
 		// This is just a regular protected route, handle appropriately
 		return obj.handleProtectedRoute(c)
 	}
+}
+
+func (obj *FiberOidcStruct) Initialize(ctx context.Context) error {
+	_, err := obj.GoOidcProvider(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = obj.Oauth2Config(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (obj *FiberOidcStruct) getAuthToken(c *fiber.Ctx) string {
