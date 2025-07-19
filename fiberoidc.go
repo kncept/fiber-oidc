@@ -19,7 +19,7 @@ type FiberOidcStruct struct {
 	Config          *Config
 	oauth2Config    *oauth2.Config
 	goOidcProvider  *gooidc.Provider
-	IdTokenVerifier *gooidc.IDTokenVerifier
+	idTokenVerifier *gooidc.IDTokenVerifier
 }
 
 type FiberOidc interface {
@@ -55,18 +55,8 @@ func New(ctx context.Context, config *Config) (FiberOidc, error) {
 		return nil, err
 	}
 
-	oidcProvider, err := gooidc.NewProvider(ctx, config.Issuer)
-	if err != nil {
-		return nil, err
-	}
-
-	// cache id token verifier
-	idTokenVerifier := oidcProvider.Verifier(&gooidc.Config{
-		ClientID: config.ClientId,
-	})
 	return &FiberOidcStruct{
-		Config:          config,
-		IdTokenVerifier: idTokenVerifier,
+		Config: config,
 	}, nil
 }
 
@@ -98,6 +88,23 @@ func (obj *FiberOidcStruct) Oauth2Config(ctx context.Context) (*oauth2.Config, e
 		}
 	}
 	return obj.oauth2Config, nil
+}
+
+func (obj *FiberOidcStruct) IdTokenVerifier(ctx context.Context) (*gooidc.IDTokenVerifier, error) {
+	if obj.idTokenVerifier == nil {
+		goOidcProvider, err := obj.GoOidcProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+		config := obj.Config
+
+		// cache id token verifier
+		idTokenVerifier := goOidcProvider.Verifier(&gooidc.Config{
+			ClientID: config.ClientId,
+		})
+		obj.idTokenVerifier = idTokenVerifier
+	}
+	return obj.idTokenVerifier, nil
 }
 
 func (obj *FiberOidcStruct) ProtectedRoute() fiber.Handler {
@@ -153,6 +160,10 @@ func (obj *FiberOidcStruct) Initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	_, err = obj.IdTokenVerifier(ctx)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -195,8 +206,13 @@ func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 		return errors.New("auth code not exchangable for token")
 	}
 
+	idTokenVerifier, err := obj.IdTokenVerifier(ctx)
+	if err != nil {
+		return err
+	}
+
 	// Parse and verify ID Token payload.
-	idToken, err := obj.IdTokenVerifier.Verify(c.Context(), rawToken)
+	idToken, err := idTokenVerifier.Verify(ctx, rawToken)
 	if err != nil {
 		return err
 	}
@@ -231,14 +247,20 @@ func (obj *FiberOidcStruct) doAuthRequiredRedirect(c *fiber.Ctx) error {
 }
 
 func (obj *FiberOidcStruct) handleProtectedRoute(c *fiber.Ctx) error {
+	ctx := c.Context()
 	rawToken := obj.getAuthToken(c)
 	if rawToken == "" {
 		return obj.doAuthRequiredRedirect(c)
 	}
 
+	idTokenVerifier, err := obj.IdTokenVerifier(ctx)
+	if err != nil {
+		return err
+	}
+
 	// Parse the JWT
 	// token, err := jwt.Parse([]byte(tokenSring))
-	idToken, err := obj.IdTokenVerifier.Verify(c.Context(), rawToken)
+	idToken, err := idTokenVerifier.Verify(ctx, rawToken)
 	if err != nil {
 		// handle expired by re-asking for auth
 		if _, ok := err.(*gooidc.TokenExpiredError); ok {
@@ -255,11 +277,17 @@ func (obj *FiberOidcStruct) handleProtectedRoute(c *fiber.Ctx) error {
 }
 
 func (obj *FiberOidcStruct) handleUnprotectedRoute(c *fiber.Ctx) error {
+	ctx := c.Context()
 	rawToken := obj.getAuthToken(c)
 	if rawToken != "" {
+		idTokenVerifier, err := obj.IdTokenVerifier(ctx)
+		if err != nil {
+			return err
+		}
+
 		// Parse the JWT
 		// token, err := jwt.Parse([]byte(tokenSring))
-		idToken, err := obj.IdTokenVerifier.Verify(c.Context(), rawToken)
+		idToken, err := idTokenVerifier.Verify(ctx, rawToken)
 		if err == nil && idToken != nil {
 			// if successful, bind to context
 			c.Locals(oidcTokenKey{}, idToken)
