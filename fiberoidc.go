@@ -23,11 +23,6 @@ type FiberOidcStruct struct {
 }
 
 type FiberOidc interface {
-	// Allows protection of the entire app in one handler
-	// This style matches the way that many web applications (eg: spring boot)
-	// tend to handle security
-	ProtectedApp(routeProtector RouteProtectorFunc) fiber.Handler
-
 	// Allows protection of a single route
 	// Will redirect if required
 	ProtectedRoute() fiber.Handler
@@ -121,34 +116,6 @@ func (obj *FiberOidcStruct) CallbackHandler() fiber.Handler {
 
 func (obj *FiberOidcStruct) CallbackPath() string {
 	return obj.Config.CallbackPath
-}
-
-// New creates a new middleware handler
-func (obj *FiberOidcStruct) ProtectedApp(routeProtector RouteProtectorFunc) fiber.Handler {
-	// Return new handler
-	return func(c *fiber.Ctx) error {
-
-		// only execute middleware on protected routes
-		// by default, all routes are protected
-		if routeProtector != nil {
-			protected, err := routeProtector(c)
-			if err != nil {
-				return err
-			}
-			if !protected {
-				return obj.handleUnprotectedRoute(c)
-			}
-		}
-
-		// Set token back to client on this call
-		// essentially handleOAuth2Callback from https://github.com/coreos/go-oidc
-		if c.Path() == obj.Config.CallbackPath {
-			return obj.handleOAuth2Callback(c)
-		}
-
-		// This is just a regular protected route, handle appropriately
-		return obj.handleProtectedRoute(c)
-	}
 }
 
 func (obj *FiberOidcStruct) Initialize(ctx context.Context) error {

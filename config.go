@@ -10,10 +10,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// Defines a function to skip this middleware when returning false.
-// Use this to determine Authenticated and Non-Authenticated routes
-type RouteProtectorFunc func(c *fiber.Ctx) (bool, error)
-
 // Config defines the config for middleware.
 type Config struct {
 	Issuer       string
@@ -99,7 +95,7 @@ func (cfg *Config) WithDefaults() *Config {
 	if cfg.LoginSuccessHandler == nil {
 		cfg.LoginSuccessHandler = configDefaults.LoginSuccessHandler
 	}
-	if cfg.Scopes == nil || len(cfg.Scopes) == 0 {
+	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = configDefaults.Scopes
 	}
 
