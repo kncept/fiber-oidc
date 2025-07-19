@@ -17,8 +17,8 @@ type oidcTokenKey struct{}
 // which should, of course, be entirely unnessesary
 type FiberOidcStruct struct {
 	Config          *Config
-	OidcConfig      *oauth2.Config
-	OidcProvider    *gooidc.Provider
+	oauth2Config    *oauth2.Config
+	goOidcProvider  *gooidc.Provider
 	IdTokenVerifier *gooidc.IDTokenVerifier
 }
 
@@ -56,42 +56,56 @@ func New(ctx context.Context, config *Config) (FiberOidc, error) {
 		return nil, err
 	}
 
-	oidcConfig := &oauth2.Config{
-		ClientID:     config.ClientId,
-		ClientSecret: config.ClientSecret,
-		Endpoint:     oidcProvider.Endpoint(),
-		RedirectURL:  config.RedirectUri,
-		Scopes:       config.Scopes,
-	}
-
 	// cache id token verifier
 	idTokenVerifier := oidcProvider.Verifier(&gooidc.Config{
 		ClientID: config.ClientId,
 	})
 	return &FiberOidcStruct{
 		Config:          config,
-		OidcConfig:      oidcConfig,
 		IdTokenVerifier: idTokenVerifier,
-		OidcProvider:    oidcProvider,
 	}, nil
 }
 
-func (obj *FiberOidcStruct) ProtectedRoute() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return obj.handleProtectedRoute(c)
+func (obj *FiberOidcStruct) GoOidcProvider(ctx context.Context) (*gooidc.Provider, error) {
+	if obj.goOidcProvider == nil {
+		config := obj.Config
+		oidcProvider, err := gooidc.NewProvider(ctx, config.Issuer)
+		if err != nil {
+			return nil, err
+		}
+		obj.goOidcProvider = oidcProvider
 	}
+	return obj.goOidcProvider, nil
+}
+
+func (obj *FiberOidcStruct) Oauth2Config(ctx context.Context) (*oauth2.Config, error) {
+	if obj.oauth2Config == nil {
+		goOidcProvider, err := obj.GoOidcProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+		config := obj.Config
+		obj.oauth2Config = &oauth2.Config{
+			ClientID:     config.ClientId,
+			ClientSecret: config.ClientSecret,
+			Endpoint:     goOidcProvider.Endpoint(),
+			RedirectURL:  config.RedirectUri,
+			Scopes:       config.Scopes,
+		}
+	}
+	return obj.oauth2Config, nil
+}
+
+func (obj *FiberOidcStruct) ProtectedRoute() fiber.Handler {
+	return obj.handleProtectedRoute
 }
 
 func (obj *FiberOidcStruct) UnprotectedRoute() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return obj.handleUnprotectedRoute(c)
-	}
+	return obj.handleUnprotectedRoute
 }
 
 func (obj *FiberOidcStruct) CallbackHandler() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return obj.handleOAuth2Callback(c)
-	}
+	return obj.handleOAuth2Callback
 }
 
 func (obj *FiberOidcStruct) CallbackPath() string {
@@ -100,7 +114,6 @@ func (obj *FiberOidcStruct) CallbackPath() string {
 
 // New creates a new middleware handler
 func (obj *FiberOidcStruct) ProtectedApp(routeProtector RouteProtectorFunc) fiber.Handler {
-
 	// Return new handler
 	return func(c *fiber.Ctx) error {
 
@@ -142,6 +155,7 @@ func (obj *FiberOidcStruct) getAuthToken(c *fiber.Ctx) string {
 }
 
 func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
+	ctx := c.Context()
 	// decode response
 
 	// state verification (and/or restoration)
@@ -149,7 +163,12 @@ func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 
 	// callback to the oidc server to exchange the code
 	code := c.Query("code")
-	oauth2Token, err := obj.OidcConfig.Exchange(c.Context(), code)
+
+	oauth2Config, err := obj.Oauth2Config(ctx)
+	if err != nil {
+		return err
+	}
+	oauth2Token, err := oauth2Config.Exchange(ctx, code)
 	if err != nil {
 		return err
 	}
@@ -185,9 +204,14 @@ func (obj *FiberOidcStruct) doAuthRequiredRedirect(c *fiber.Ctx) error {
 		return err
 	}
 
+	oauth2Config, err := obj.Oauth2Config(c.Context())
+	if err != nil {
+		return err
+	}
+
 	// V3 Redirect (for later)
 	// return c.Redirect().To(cfg.OidcConfig.AuthCodeURL(""))
-	return c.Redirect(obj.OidcConfig.AuthCodeURL(state), 302)
+	return c.Redirect(oauth2Config.AuthCodeURL(state), 302)
 }
 
 func (obj *FiberOidcStruct) handleProtectedRoute(c *fiber.Ctx) error {
