@@ -95,7 +95,8 @@ func (obj *FiberOidcStruct) IdTokenVerifier(ctx context.Context) (*gooidc.IDToke
 
 		// cache id token verifier
 		idTokenVerifier := goOidcProvider.Verifier(&gooidc.Config{
-			ClientID: config.ClientId,
+			ClientID:             config.ClientId,
+			SupportedSigningAlgs: config.SupportedSigningAlgs,
 		})
 		obj.idTokenVerifier = idTokenVerifier
 	}

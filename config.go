@@ -12,15 +12,20 @@ import (
 
 // Config defines the config for middleware.
 type Config struct {
-	Issuer       string
-	ClientId     string
-	ClientSecret string
+	// REQUIRED
+	Issuer string
 
-	// OPTIONAL, will be defaulted if unspecified
-	Scopes []string
+	// REQUIRED
+	ClientId string
+
+	// REQUIRED
+	ClientSecret string
 
 	// FULLY QUALIFIED Oauth2 Callback path
 	RedirectUri string
+
+	// OPTIONAL, will be defaulted if unspecified
+	Scopes []string
 
 	// OPTIONAL
 	// trigger oidc callback on this path.
@@ -29,24 +34,22 @@ type Config struct {
 	CallbackPath string
 
 	// OPTIONAL
-	//
 	// if set, also use an auth cookie (allow identity token to be set directly)
 	AuthCookieName string
 
 	// OPTIONAL
-	//
 	// Unauthorized defines the response body for unauthorized responses.
 	// By default it will return with a 401 Unauthorized and the correct WWW-Auth header
 	Unauthorized fiber.Handler
 
 	// OPTIONAL
-	//
 	// Called to serialize state for the OIDC redirect
 	// If unspecified, will just the be the current path
 	//
 	// Should be paired with a SuccessHandler if provided
 	LoginStateEncoder func(c *fiber.Ctx) (string, error)
-	// Optional
+
+	// OPTIONAL
 	//
 	// Called on login success to restore any application state there
 	// may have been.
@@ -54,6 +57,11 @@ type Config struct {
 	//
 	// Should be paired with a StateEncoder if provided
 	LoginSuccessHandler func(state string, c *fiber.Ctx) error
+
+	// OPTIONAL
+	// If set, limit the allowed signing args to this list
+	// defaults to RS256,RS512
+	SupportedSigningAlgs []string
 }
 
 // ConfigDefault is the default config
@@ -66,10 +74,17 @@ var configDefaults = Config{
 		return c.Path(), nil
 	},
 	LoginSuccessHandler: func(state string, c *fiber.Ctx) error {
+		if state == "" {
+			state = "/"
+		}
 		return c.Redirect(state, 302)
 	},
 	Scopes: []string{
 		gooidc.ScopeOpenID, "email", "profile",
+	},
+	SupportedSigningAlgs: []string{
+		"RS256",
+		"RS512",
 	},
 }
 
@@ -97,6 +112,9 @@ func (cfg *Config) WithDefaults() *Config {
 	}
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = configDefaults.Scopes
+	}
+	if len(cfg.SupportedSigningAlgs) == 0 {
+		cfg.SupportedSigningAlgs = configDefaults.SupportedSigningAlgs
 	}
 
 	return cfg
