@@ -150,13 +150,11 @@ func (obj *FiberOidcStruct) getAuthToken(c *fiber.Ctx) string {
 
 func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 	ctx := c.Context()
-	// decode response
 
-	// state verification (and/or restoration)
-	state := c.Query("state")
-
-	// callback to the oidc server to exchange the code
-	code := c.Query("code")
+	//c.Query() doesn't seem to work.
+	queries := c.Queries()
+	state := queries["state"]
+	code := queries["code"]
 
 	oauth2Config, err := obj.Oauth2Config(ctx)
 	if err != nil {

@@ -9,9 +9,9 @@ That said, these things are easy to fix with a PR that enables support for your 
 # Quickstart
 
 To install:
-`go get github.com/kncept/fiber-oidc@v1.0.2`
+`go get github.com/kncept/fiber-oidc`
 
-Example snippet from another app:
+Example snippet:
 ```
 	fiberOidc, err := fiberoidc.New(ctx, &fiberoidc.Config{
 		Issuer:         "https://accounts.google.com",
