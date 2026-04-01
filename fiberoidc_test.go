@@ -9,6 +9,9 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+var _ FiberOidc = (*FiberOidcStruct)(nil)
+var _ Providers = (*FiberOidcStruct)(nil)
+
 func execVirtualHandler(
 	uri string,
 	authHeader string,

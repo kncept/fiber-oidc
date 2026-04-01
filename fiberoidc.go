@@ -3,6 +3,7 @@ package fiberoidc
 import (
 	"context"
 	"errors"
+	"sync"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
@@ -11,15 +12,20 @@ import (
 )
 
 // internal context key for the oidc
-type oidcTokenKey struct{}
+type goOidcTokenKey struct{}
+type oauth2TokenKey struct{}
 
 // direct access to fields, if you need to tweak or override something
 // which should, of course, be entirely unnessesary
 type FiberOidcStruct struct {
-	Config          *Config
-	oauth2Config    *oauth2.Config
-	goOidcProvider  *gooidc.Provider
-	idTokenVerifier *gooidc.IDTokenVerifier
+	Config *Config
+
+	oauth2Config_mu    sync.Mutex
+	oauth2Config       *oauth2.Config
+	goOidcProvider_mu  sync.Mutex
+	goOidcProvider     *gooidc.Provider
+	idTokenVerifier_mu sync.Mutex
+	idTokenVerifier    *gooidc.IDTokenVerifier
 }
 
 type FiberOidc interface {
@@ -39,6 +45,14 @@ type FiberOidc interface {
 
 	// FiberOidc uses lazy initialization - call this if you're eager!
 	Initialize(ctx context.Context) error
+
+	Providers() Providers
+}
+
+type Providers interface {
+	GoOidcProvider(ctx context.Context) (*gooidc.Provider, error)
+	Oauth2Config(ctx context.Context) (*oauth2.Config, error)
+	IdTokenVerifier(ctx context.Context) (*gooidc.IDTokenVerifier, error)
 }
 
 func New(ctx context.Context, config *Config) (FiberOidc, error) {
@@ -56,6 +70,8 @@ func New(ctx context.Context, config *Config) (FiberOidc, error) {
 }
 
 func (obj *FiberOidcStruct) GoOidcProvider(ctx context.Context) (*gooidc.Provider, error) {
+	obj.goOidcProvider_mu.Lock()
+	defer obj.goOidcProvider_mu.Unlock()
 	if obj.goOidcProvider == nil {
 		config := obj.Config
 		oidcProvider, err := gooidc.NewProvider(ctx, config.Issuer)
@@ -68,6 +84,8 @@ func (obj *FiberOidcStruct) GoOidcProvider(ctx context.Context) (*gooidc.Provide
 }
 
 func (obj *FiberOidcStruct) Oauth2Config(ctx context.Context) (*oauth2.Config, error) {
+	obj.oauth2Config_mu.Lock()
+	defer obj.oauth2Config_mu.Unlock()
 	if obj.oauth2Config == nil {
 		goOidcProvider, err := obj.GoOidcProvider(ctx)
 		if err != nil {
@@ -86,6 +104,8 @@ func (obj *FiberOidcStruct) Oauth2Config(ctx context.Context) (*oauth2.Config, e
 }
 
 func (obj *FiberOidcStruct) IdTokenVerifier(ctx context.Context) (*gooidc.IDTokenVerifier, error) {
+	obj.idTokenVerifier_mu.Lock()
+	obj.idTokenVerifier_mu.Unlock()
 	if obj.idTokenVerifier == nil {
 		goOidcProvider, err := obj.GoOidcProvider(ctx)
 		if err != nil {
@@ -133,6 +153,10 @@ func (obj *FiberOidcStruct) Initialize(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (obj *FiberOidcStruct) Providers() Providers {
+	return obj
 }
 
 func (obj *FiberOidcStruct) getAuthToken(c *fiber.Ctx) string {
@@ -183,7 +207,8 @@ func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 		return err
 	}
 	// if successful, bind to context
-	c.Locals(oidcTokenKey{}, idToken)
+	c.Locals(goOidcTokenKey{}, idToken)
+	c.Locals(oauth2TokenKey{}, oauth2Token)
 
 	// also set it into a cookie if configured to do so
 	if obj.Config.AuthCookieName != "" {
@@ -238,7 +263,12 @@ func (obj *FiberOidcStruct) handleProtectedRoute(c *fiber.Ctx) error {
 		return obj.Config.Unauthorized(c)
 	}
 	// if successful, bind to context
-	c.Locals(oidcTokenKey{}, idToken)
+	oauth2Token := &oauth2.Token{
+		AccessToken: rawToken,
+		Expiry:      idToken.Expiry,
+	}
+	c.Locals(goOidcTokenKey{}, idToken)
+	c.Locals(oauth2TokenKey{}, oauth2Token)
 	return c.Next()
 }
 
@@ -256,19 +286,46 @@ func (obj *FiberOidcStruct) handleUnprotectedRoute(c *fiber.Ctx) error {
 		idToken, err := idTokenVerifier.Verify(ctx, rawToken)
 		if err == nil && idToken != nil {
 			// if successful, bind to context
-			c.Locals(oidcTokenKey{}, idToken)
+			oauth2Token := &oauth2.Token{
+				AccessToken: rawToken,
+				Expiry:      idToken.Expiry,
+			}
+			c.Locals(goOidcTokenKey{}, idToken)
+			c.Locals(oauth2TokenKey{}, oauth2Token)
 		}
 
 	}
 	return c.Next()
 }
 
-// IdTokenFromContext returns the jwt token found in the context
+// GoOidcToken returns the jwt token found in the context
 // returns a nil pointer if nothing exists
-func IdTokenFromContext(c *fiber.Ctx) *gooidc.IDToken {
-	token, ok := c.Locals(oidcTokenKey{}).(*gooidc.IDToken)
+func GoOidcToken(c *fiber.Ctx) *gooidc.IDToken {
+	token, ok := c.Locals(goOidcTokenKey{}).(*gooidc.IDToken)
 	if !ok {
 		return nil
 	}
 	return token
+}
+
+func Oauth2Token(c *fiber.Ctx) *oauth2.Token {
+	token, ok := c.Locals(oauth2TokenKey{}).(*oauth2.Token)
+	if !ok {
+		return nil
+	}
+	return token
+}
+
+func Oauth2TokenSource(c *fiber.Ctx) oauth2.TokenSource {
+	return &oauth2TokenSourceWrapper{
+		c: c,
+	}
+}
+
+type oauth2TokenSourceWrapper struct {
+	c *fiber.Ctx
+}
+
+func (obj *oauth2TokenSourceWrapper) Token() (*oauth2.Token, error) {
+	return Oauth2Token(obj.c), nil
 }
