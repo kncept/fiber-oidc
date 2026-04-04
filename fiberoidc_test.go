@@ -10,7 +10,6 @@ import (
 )
 
 var _ FiberOidc = (*FiberOidcStruct)(nil)
-var _ Providers = (*FiberOidcStruct)(nil)
 
 func execVirtualHandler(
 	uri string,
@@ -97,7 +96,9 @@ func TestGetAuth(t *testing.T) {
 
 	// now with auth cookie name set
 	obj.Config = &Config{
-		AuthCookieName: authCookieName,
+		WebAppConfig: WebAppConfig{
+			AuthCookieName: authCookieName,
+		},
 	}
 
 	execVirtualHandler(

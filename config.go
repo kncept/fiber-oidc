@@ -8,25 +8,11 @@ import (
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
+	"github.com/kncept/fiber-oidc/provider"
 )
 
 // Config defines the config for middleware.
-type Config struct {
-	// REQUIRED
-	Issuer string
-
-	// REQUIRED
-	ClientId string
-
-	// REQUIRED
-	ClientSecret string
-
-	// FULLY QUALIFIED Oauth2 Callback path
-	RedirectUri string
-
-	// OPTIONAL, will be defaulted if unspecified
-	Scopes []string
-
+type WebAppConfig struct {
 	// OPTIONAL
 	// trigger oidc callback on this path.
 	// It MUST match the RedirectUri value
@@ -57,34 +43,38 @@ type Config struct {
 	//
 	// Should be paired with a StateEncoder if provided
 	LoginSuccessHandler func(state string, c *fiber.Ctx) error
+}
 
-	// OPTIONAL
-	// If set, limit the allowed signing args to this list
-	// defaults to RS256,RS512
-	SupportedSigningAlgs []string
+type Config struct {
+	provider.OidcProviderConfig
+	WebAppConfig
 }
 
 // ConfigDefault is the default config
 var configDefaults = Config{
-	Unauthorized: func(c *fiber.Ctx) error {
-		c.Set(fiber.HeaderWWWAuthenticate, "Bearer")
-		return c.SendStatus(fiber.StatusUnauthorized)
+	OidcProviderConfig: provider.OidcProviderConfig{
+		Scopes: []string{
+			gooidc.ScopeOpenID, "email", "profile",
+		},
+		SupportedSigningAlgs: []string{
+			"RS256",
+			"RS512",
+		},
 	},
-	LoginStateEncoder: func(c *fiber.Ctx) (string, error) {
-		return c.Path(), nil
-	},
-	LoginSuccessHandler: func(state string, c *fiber.Ctx) error {
-		if state == "" {
-			state = "/"
-		}
-		return c.Redirect(state, 302)
-	},
-	Scopes: []string{
-		gooidc.ScopeOpenID, "email", "profile",
-	},
-	SupportedSigningAlgs: []string{
-		"RS256",
-		"RS512",
+	WebAppConfig: WebAppConfig{
+		Unauthorized: func(c *fiber.Ctx) error {
+			c.Set(fiber.HeaderWWWAuthenticate, "Bearer")
+			return c.SendStatus(fiber.StatusUnauthorized)
+		},
+		LoginStateEncoder: func(c *fiber.Ctx) (string, error) {
+			return c.Path(), nil
+		},
+		LoginSuccessHandler: func(state string, c *fiber.Ctx) error {
+			if state == "" {
+				state = "/"
+			}
+			return c.Redirect(state, 302)
+		},
 	},
 }
 
