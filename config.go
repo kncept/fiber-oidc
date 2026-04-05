@@ -13,6 +13,9 @@ import (
 
 // Config defines the config for middleware.
 type WebAppConfig struct {
+	// OPTIONAL, defaults to true
+	AutoRefreshOnExpiry *bool
+
 	// OPTIONAL
 	// trigger oidc callback on this path.
 	// It MUST match the RedirectUri value
@@ -22,6 +25,10 @@ type WebAppConfig struct {
 	// OPTIONAL
 	// if set, also use an auth cookie (allow identity token to be set directly)
 	AuthCookieName string
+
+	// OPTIONAL
+	// if set, also use an auth cookie (allow identity token to be set directly)
+	AuthRefreshCookieName string
 
 	// OPTIONAL
 	// Unauthorized defines the response body for unauthorized responses.
@@ -51,6 +58,7 @@ type Config struct {
 }
 
 // ConfigDefault is the default config
+var boolTrue = true
 var configDefaults = Config{
 	OidcProviderConfig: provider.OidcProviderConfig{
 		Scopes: []string{
@@ -62,6 +70,7 @@ var configDefaults = Config{
 		},
 	},
 	WebAppConfig: WebAppConfig{
+		AutoRefreshOnExpiry: &boolTrue,
 		Unauthorized: func(c *fiber.Ctx) error {
 			c.Set(fiber.HeaderWWWAuthenticate, "Bearer")
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -105,6 +114,9 @@ func (cfg *Config) WithDefaults() *Config {
 	}
 	if len(cfg.SupportedSigningAlgs) == 0 {
 		cfg.SupportedSigningAlgs = configDefaults.SupportedSigningAlgs
+	}
+	if cfg.AutoRefreshOnExpiry == nil {
+		cfg.AutoRefreshOnExpiry = configDefaults.AutoRefreshOnExpiry
 	}
 
 	return cfg

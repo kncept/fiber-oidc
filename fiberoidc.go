@@ -56,11 +56,11 @@ func New(ctx context.Context, config *Config) (FiberOidc, error) {
 }
 
 func (obj *FiberOidcStruct) ProtectedRoute() fiber.Handler {
-	return obj.handleProtectedRoute
+	return obj.protectedRouteHandler(true)
 }
 
 func (obj *FiberOidcStruct) UnprotectedRoute() fiber.Handler {
-	return obj.handleUnprotectedRoute
+	return obj.protectedRouteHandler(false)
 }
 
 func (obj *FiberOidcStruct) CallbackHandler() fiber.Handler {
@@ -88,6 +88,19 @@ func (obj *FiberOidcStruct) getAuthToken(c *fiber.Ctx) string {
 	}
 	return ""
 }
+func (obj *FiberOidcStruct) getRefreshToken(c *fiber.Ctx) string {
+	// Get authorization header
+	refreshToken := c.Get("Authorization-Refresh") // shouldn't _really_ be sent.
+	if refreshToken != "" {
+		return refreshToken
+	}
+
+	// if its empty, fallback to 'refreshcookiename' (if not blank)
+	if refreshToken == "" && obj.Config.AuthRefreshCookieName != "" {
+		return c.Cookies(obj.Config.AuthRefreshCookieName)
+	}
+	return ""
+}
 
 func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 	ctx := c.Context()
@@ -106,13 +119,7 @@ func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 		return err
 	}
 
-	// Extract the ID Token from OAuth2 token.
-	rawToken, ok := oauth2Token.Extra("id_token").(string)
-	if !ok {
-		return errors.New("auth code not exchangable for token")
-	}
-
-	userAuth, err := obj.OidcProviders.ValidateJwt(ctx, rawToken)
+	userAuth, err := obj.OidcProviders.ValidateJwt(ctx, oauth2Token.AccessToken, oauth2Token.RefreshToken)
 	if err != nil {
 		return err
 	}
@@ -122,7 +129,13 @@ func (obj *FiberOidcStruct) handleOAuth2Callback(c *fiber.Ctx) error {
 	if obj.Config.AuthCookieName != "" {
 		c.Cookie(&fiber.Cookie{
 			Name:  obj.Config.AuthCookieName,
-			Value: rawToken,
+			Value: oauth2Token.AccessToken,
+		})
+	}
+	if obj.Config.AuthRefreshCookieName != "" {
+		c.Cookie(&fiber.Cookie{
+			Name:  obj.Config.AuthRefreshCookieName,
+			Value: oauth2Token.RefreshToken,
 		})
 	}
 	// complete, use *FromContext to access user details
@@ -145,37 +158,54 @@ func (obj *FiberOidcStruct) doAuthRequiredRedirect(c *fiber.Ctx) error {
 	return c.Redirect(oauth2Config.AuthCodeURL(state), 302)
 }
 
-func (obj *FiberOidcStruct) handleProtectedRoute(c *fiber.Ctx) error {
-	ctx := c.Context()
-	rawToken := obj.getAuthToken(c)
-	if rawToken == "" {
-		return obj.doAuthRequiredRedirect(c)
-	}
-
-	userAuth, err := obj.OidcProviders.ValidateJwt(ctx, rawToken)
-	if err != nil {
-		if errors.Is(err, provider.ErrTokenExpired) {
-			return obj.doAuthRequiredRedirect(c)
+func (obj *FiberOidcStruct) protectedRouteHandler(protectedRoute bool) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		ctx := c.Context()
+		accessToken := obj.getAuthToken(c)
+		refreshToken := ""
+		if *obj.Config.AutoRefreshOnExpiry {
+			refreshToken = obj.getRefreshToken(c)
 		}
-		return err
-	}
-	c.Locals(fiberOidcAuthLocalsKey{}, userAuth)
+		if accessToken == "" {
+			if protectedRoute {
+				return obj.doAuthRequiredRedirect(c)
+			} else {
+				return c.Next()
+			}
+		}
 
-	return c.Next()
-}
-
-func (obj *FiberOidcStruct) handleUnprotectedRoute(c *fiber.Ctx) error {
-	ctx := c.Context()
-	rawToken := obj.getAuthToken(c)
-	if rawToken != "" {
-
-		userAuth, err := obj.OidcProviders.ValidateJwt(ctx, rawToken)
-		if err != nil {
+		userAuth, err := obj.OidcProviders.ValidateJwt(ctx, accessToken, refreshToken)
+		if protectedRoute && err != nil {
+			if errors.Is(err, provider.ErrTokenExpired) {
+				return obj.doAuthRequiredRedirect(c)
+			}
 			return err
 		}
-		c.Locals(fiberOidcAuthLocalsKey{}, userAuth)
+		if userAuth != nil {
+			if userAuth.GetOauth2Token().AccessToken != accessToken && obj.Config.AuthCookieName != "" {
+				c.Cookie(&fiber.Cookie{
+					Name:  obj.Config.AuthCookieName,
+					Value: userAuth.GetOauth2Token().AccessToken,
+				})
+			}
+			if refreshToken != "" && userAuth.GetOauth2Token().RefreshToken != refreshToken && obj.Config.AuthRefreshCookieName != "" {
+				c.Cookie(&fiber.Cookie{
+					Name:  obj.Config.AuthRefreshCookieName,
+					Value: userAuth.GetOauth2Token().RefreshToken,
+				})
+			}
+			c.Locals(fiberOidcAuthLocalsKey{}, userAuth)
+		} else {
+			if obj.Config.AuthCookieName != "" {
+				c.ClearCookie(obj.Config.AuthCookieName)
+			}
+			if obj.Config.AuthRefreshCookieName != "" {
+				c.ClearCookie(obj.Config.AuthRefreshCookieName)
+			}
+		}
+
+		return c.Next()
 	}
-	return c.Next()
 }
 
 func ProviderAuth(c *fiber.Ctx) *provider.ProviderAuth {

@@ -8,10 +8,10 @@ var ErrNotAuthorized = errors.New("not authorized")
 var ErrTokenExpired = errors.New("token is expired")
 
 func errInitialization(err error) error {
-	return ensure(err, ErrInitialization)
+	return EnsureErr(err, ErrInitialization)
 }
 
-func ensure(err error, varErrType error) error {
+func EnsureErr(err error, varErrType error) error {
 	if errors.Is(err, varErrType) {
 		return err
 	}
